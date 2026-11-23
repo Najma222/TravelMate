@@ -69,6 +69,10 @@ class BaseConfig:
     LOGIN_FAILURE_LIMIT = 5
     LOGIN_FAILURE_WINDOW_MINUTES = 15
 
+    # Number of reverse proxies in front of Flask (nginx in docker-compose = 1). Enables
+    # ProxyFix so rate limits and audit logs see the real client IP, not the proxy's.
+    TRUSTED_PROXIES = int(_env("TRUSTED_PROXIES", "0"))
+
     LOG_LEVEL = _env("LOG_LEVEL", "INFO")
     BCRYPT_LOG_ROUNDS = 12
     ALLOW_DEMO_SEED = False

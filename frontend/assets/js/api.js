@@ -1,5 +1,13 @@
-// API helper. Set MOCK=false once Flask is running; mock data follows the PRD contract.
-const API={MOCK:true,BASE:'/api'};
+// API helper.
+// Real mode (default): talks to the Flask backend on the same origin at /api/v1
+// (the nginx "web" container proxies /api and /media to Flask).
+// Mock mode: run localStorage.tm_mock='1' in the browser console, then reload, to use the
+// built-in sample data without a backend (localStorage.removeItem('tm_mock') to switch back).
+// Advanced: localStorage.tm_api_base='http://localhost:5000/api/v1' points at a different API.
+const API={
+ MOCK:(()=>{try{return localStorage.getItem('tm_mock')==='1'}catch{return false}})(),
+ BASE:(()=>{try{return localStorage.getItem('tm_api_base')||'/api/v1'}catch{return '/api/v1'}})()
+};
 
 // ---- Mock data (only used while MOCK=true) ----
 // Sample places per destination. The real backend gets these from Geoapify.
@@ -96,13 +104,164 @@ function mock(path,m,b){
  return Promise.reject({message:'Unknown endpoint '+path});
 }
 
+// ---- Translation layer -----------------------------------------------------
+// The pages were written against the shapes the mock returns. The Flask API uses
+// different envelopes and field names, so everything is translated here. Page code
+// stays untouched.
+
+const DAY_BASE=900000000;          // synthetic itinerary-day ids (real ids are per activity)
+const dayIndex={};                  // synthetic day id -> {tripId, dayNumber, itemIds}
+const num=v=>v==null?0:Number(v);
+const category=v=>String(v||'').toLowerCase().trim().replace(/[\s-]+/g,'_');
+const hhmm=v=>/^\d{1,2}:\d{2}$/.test(String(v||'').trim())?String(v).trim():null;
+
+function adaptTrip(t){
+ if(!t)return t;
+ return{...t,
+  travellers:t.travellers!=null?t.travellers:num(t.traveller_count),
+  budget:num(t.budget),
+  transport_pref:t.transport_pref!=null?t.transport_pref:t.transport_preference,
+  stay_pref:t.stay_pref!=null?t.stay_pref:t.accommodation_preference};
+}
+
+function adaptExpense(e){
+ return{...e,label:e.label!=null?e.label:(e.description||''),amount:num(e.amount)};
+}
+
+function adaptBooking(b){
+ return{...b,
+  type:b.type!=null?b.type:b.booking_type,
+  reference:b.reference!=null?b.reference:(b.booking_reference||''),
+  date:b.date!=null?b.date:(b.booked_on||''),
+  amount:num(b.amount)};
+}
+
+function adaptItinerary(res){
+ const tripId=Number(res&&res.trip_id)||0;
+ return((res&&res.days)||[]).map(d=>{
+  const dayNumber=Number(d.day_number)||1;
+  const id=DAY_BASE+tripId*1000+dayNumber;
+  const items=(d.items||[]).map(it=>({id:it.id,time:it.start_time||'',activity:it.activity_name||''}));
+  dayIndex[id]={tripId,dayNumber,itemIds:items.map(i=>i.id)};
+  return{id,day_number:dayNumber,title:d.title||('Day '+dayNumber),items};
+ });
+}
+
+function weatherSuggestion(c){
+ if(/rain|drizzle|shower|thunder/i.test(c))return 'Carry a rain jacket or umbrella.';
+ if(/snow/i.test(c))return 'Pack warm layers and waterproof shoes.';
+ if(/clear|sun/i.test(c))return 'Carry sunscreen and stay hydrated.';
+ if(/cloud|fog|mist|overcast/i.test(c))return 'Pack a light layer for cloudy or misty weather.';
+ return '';
+}
+
+function adaptWeather(res){
+ const w=res&&res.weather?res.weather:res;
+ if(!w||!w.available)return{available:false};
+ const daily=w.daily||[],today=new Date().toISOString().slice(0,10);
+ const d=daily.find(x=>x.date===today)||daily[0]||{};
+ const cur=w.current||{};
+ const condition=cur.condition||d.condition||'Unknown';
+ const temp=cur.temperature_c!=null?Math.round(cur.temperature_c):
+  (d.high_c!=null&&d.low_c!=null?Math.round((Number(d.high_c)+Number(d.low_c))/2):null);
+ return{available:true,temp,low:d.low_c,high:d.high_c,condition,
+  rain_prob:d.precip_prob_max!=null?Math.round(d.precip_prob_max):0,
+  suggestion:w.message||weatherSuggestion(condition)};
+}
+
+function adaptPlaces(res){
+ const out=[];
+ ((res&&res.places)||[]).forEach(p=>{if(p.latitude!=null&&p.longitude!=null)out.push({name:p.name,lat:p.latitude,lon:p.longitude})});
+ ((res&&res.stops)||[]).forEach(s=>{if(s.latitude!=null&&s.longitude!=null)out.push({name:s.name,lat:s.latitude,lon:s.longitude})});
+ return out;
+}
+
+function toBackendBody(path,body){
+ if(!body)return body;
+ const b={...body};
+ if(path==='/trips'&&b.travellers!=null){
+  b.traveller_count=b.travellers;delete b.travellers;
+  if(b.transport_pref!=null){b.transport_preference=String(b.transport_pref).toLowerCase();delete b.transport_pref}
+  if(b.stay_pref!=null){b.accommodation_preference=String(b.stay_pref).toLowerCase();delete b.stay_pref}
+ }
+ if(/\/expenses$/.test(path)&&b.label!=null){b.description=b.label;delete b.label}
+ if(b.category!=null)b.category=category(b.category);
+ if(/\/bookings$/.test(path)){
+  if(b.type!=null){b.booking_type=String(b.type).toLowerCase();delete b.type}
+  if(b.reference!=null){b.booking_reference=b.reference;delete b.reference}
+  if(b.date!=null){b.booked_on=b.date;delete b.date}
+ }
+ return b;
+}
+
+function adaptResponse(path,method,data){
+ if(path==='/auth/login'||path==='/auth/register')return data.user;
+ if(path==='/auth/logout')return data;
+ if(path==='/trips'&&method==='POST')return adaptTrip(data.trip);
+ if(/^\/trips\/\d+$/.test(path))return adaptTrip(data.trip);
+ if(/\/generate$/.test(path)||/\/status$/.test(path))return{status:data.trip?data.trip.status:data.status};
+ if(/\/expenses$/.test(path))return method==='POST'?adaptExpense(data.expense):(data.items||[]).map(adaptExpense);
+ if(/\/bookings$/.test(path))return method==='POST'?adaptBooking(data.booking):(data.items||[]).map(adaptBooking);
+ if(/\/itinerary$/.test(path)&&method==='GET')return adaptItinerary(data);
+ if(/\/weather$/.test(path))return adaptWeather(data);
+ if(/\/places$/.test(path))return adaptPlaces(data);
+ if(path==='/trips')return (data.items||[]).map(adaptTrip);
+ if(path==='/notifications')return data.items||[];
+ if(path==='/notifications/preferences')return data.preferences||data;
+ return data;
+}
+
+function errorFrom(data,status){
+ const err=data&&data.error;
+ if(err){
+  let message=err.message||'Request failed';
+  const fields=err.details&&err.details.fields;
+  if(fields&&typeof fields==='object'){
+   const parts=Object.entries(fields).map(([k,v])=>k+': '+v);
+   if(parts.length)message+=' ('+parts.join('; ')+')';
+  }
+  return{message,code:err.code,details:err.details,status};
+ }
+ return{message:(data&&data.message)||('Request failed ('+status+')'),status};
+}
+
+async function request(path,{method='GET',body}={}){
+ const r=await fetch(API.BASE+path,{method,credentials:'include',
+  headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+ const data=await r.json().catch(()=>({}));
+ if(r.status===401&&path!=='/auth/login'&&path!=='/auth/register'){
+  location.href='login.html';
+  throw{message:'Please log in again.',status:401};
+ }
+ if(!r.ok)throw errorFrom(data,r.status);
+ return data;
+}
+
+// Saving a day edits a whole day in the page, while the API stores activity rows.
+async function saveDay(dayId,day){
+ const meta=dayIndex[dayId];
+ if(!meta)throw{message:'This itinerary is out of date. Reload the page and try again.'};
+ const tripPath='/trips/'+meta.tripId;
+ if(day.title!=null)await request(tripPath+'/days/'+meta.dayNumber,{method:'PUT',body:{title:day.title}});
+ const keep=new Set();
+ for(const item of day.items||[]){
+  const payload={activity_name:item.activity,start_time:hhmm(item.time)};
+  if(item.id){keep.add(item.id);await request('/itinerary/'+item.id,{method:'PUT',body:payload})}
+  else await request(tripPath+'/itinerary',{method:'POST',body:{...payload,day_number:meta.dayNumber}});
+ }
+ for(const id of meta.itemIds||[])if(!keep.has(id))await request('/itinerary/'+id,{method:'DELETE'});
+ const fresh=adaptItinerary(await request(tripPath+'/itinerary',{method:'GET'}));
+ return fresh.find(d=>d.day_number===meta.dayNumber)||{id:dayId,day_number:meta.dayNumber,title:day.title,items:day.items||[]};
+}
+
 async function api(path,{method='GET',body}={}){
  try{
   if(API.MOCK){await new Promise(r=>setTimeout(r,150));return await mock(path,method,body)}
-  const r=await fetch(API.BASE+path,{method,credentials:'include',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
-  const d=await r.json().catch(()=>({}));
-  if(r.status===401){location.href='login.html';return}
-  if(!r.ok)throw{message:d.error||d.message||'Request failed ('+r.status+')'};
-  return d;
+  if(method==='PUT'&&/^\/itinerary\/\d+$/.test(path)&&body&&Array.isArray(body.items)){
+   return await saveDay(Number(path.split('/').pop()),body);
+  }
+  const list=path==='/trips'&&method==='GET'?'?per_page=100':'';
+  const data=await request(path+list,{method,body:toBackendBody(path,body)});
+  return adaptResponse(path,method,data);
  }catch(e){toast(e.message||'Network error. Check your connection and try again.','danger');throw e}
 }

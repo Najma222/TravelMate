@@ -1,0 +1,486 @@
+{
+  "id": "tmTripGenerate",
+  "name": "TravelMate - Generate Itinerary",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "path": "trip-generate",
+        "responseMode": "onReceived",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "id": "travelmate-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -260,
+        0
+      ],
+      "webhookId": "travelmate-trip-generate"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst input = $input.first().json || {};\nconst body = input.body || {};\nconst headers = input.headers || {};\nconst provided = String(headers['x-webhook-secret'] || '');\nconst expected = String($env.INTERNAL_WEBHOOK_SECRET || '');\nif (expected && provided !== expected) {\n  throw new Error('Unauthorized: invalid X-Webhook-Secret');\n}\nconst start = new Date(body.start_date);\nconst end = new Date(body.end_date);\nconst computed = Math.round((end - start) / 86400000) + 1;\nconst days = Number(body.duration_days) || (Number.isFinite(computed) ? computed : 1);\nreturn [{ json: {\n  trip_id: body.trip_id,\n  generation_id: body.generation_id,\n  callback_url: body.callback_url,\n  weather_url: body.weather_url,\n  origin: body.origin,\n  destination: body.destination,\n  start_date: body.start_date,\n  end_date: body.end_date,\n  duration_days: days,\n  traveller_count: body.traveller_count || 1,\n  budget: body.budget,\n  currency: body.currency || 'INR',\n  preferences: body.preferences || '',\n  transport_preference: body.transport_preference || 'any',\n  accommodation_preference: body.accommodation_preference || 'any',\n  latitude: body.latitude != null ? Number(body.latitude) : null,\n  longitude: body.longitude != null ? Number(body.longitude) : null,\n  user_stops: Array.isArray(body.user_stops) ? body.user_stops : []\n}}];\n"
+      },
+      "id": "validate-and-prepare",
+      "name": "Validate & Prepare",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.geoapify.com/v1/geocode/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.destination }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            },
+            {
+              "name": "apiKey",
+              "value": "={{ $env.GEOAPIFY_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "geocode-destination",
+      "name": "Geocode Destination",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Validate & Prepare').first().json;\nconst input = $input.first().json || {};\nlet latitude = base.latitude;\nlet longitude = base.longitude;\nlet resolved_name = base.destination;\nconst feature = input.features && input.features[0];\nif ((latitude == null || longitude == null) && feature && feature.properties) {\n  const p = feature.properties;\n  if (p.lat != null && p.lon != null) {\n    latitude = Number(p.lat);\n    longitude = Number(p.lon);\n  }\n  resolved_name = p.city || p.name || p.formatted || resolved_name;\n}\nreturn [{ json: Object.assign({}, base, { latitude, longitude, resolved_name }) }];\n"
+      },
+      "id": "merge-geocode",
+      "name": "Merge Geocode",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.geoapify.com/v2/places",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "categories",
+              "value": "tourism.attraction,tourism.sights,leisure.park,entertainment.museum"
+            },
+            {
+              "name": "filter",
+              "value": "={{ 'circle:' + $json.longitude + ',' + $json.latitude + ',25000' }}"
+            },
+            {
+              "name": "limit",
+              "value": "20"
+            },
+            {
+              "name": "apiKey",
+              "value": "={{ $env.GEOAPIFY_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "places",
+      "name": "Places",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        620,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Merge Geocode').first().json;\nconst input = $input.first().json || {};\nconst places = [];\nfor (const f of (input.features || [])) {\n  const p = f.properties || {};\n  const c = (f.geometry && f.geometry.coordinates) || [];\n  const lat = p.lat != null ? Number(p.lat) : (c.length > 1 ? Number(c[1]) : null);\n  const lon = p.lon != null ? Number(p.lon) : (c.length > 0 ? Number(c[0]) : null);\n  if (p.name && Number.isFinite(lat) && Number.isFinite(lon)) {\n    places.push({ name: p.name, category: (p.categories || [])[0] || '', lat, lon });\n  }\n}\nreturn [{ json: Object.assign({}, base, { places }) }];\n"
+      },
+      "id": "merge-places",
+      "name": "Merge Places",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "latitude",
+              "value": "={{ $json.latitude }}"
+            },
+            {
+              "name": "longitude",
+              "value": "={{ $json.longitude }}"
+            },
+            {
+              "name": "current",
+              "value": "temperature_2m,weather_code"
+            },
+            {
+              "name": "daily",
+              "value": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+            },
+            {
+              "name": "timezone",
+              "value": "auto"
+            },
+            {
+              "name": "forecast_days",
+              "value": "16"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "weather",
+      "name": "Weather",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1060,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Merge Places').first().json;\nconst input = $input.first().json || {};\nlet weather = null;\nlet weather_message = null;\nif (input.daily && Array.isArray(input.daily.time)) {\n  const daily = [];\n  for (let i = 0; i < input.daily.time.length; i++) {\n    const date = input.daily.time[i];\n    if (date < base.start_date || date > base.end_date) continue;\n    daily.push({\n      date,\n      temp_max_c: input.daily.temperature_2m_max ? input.daily.temperature_2m_max[i] : null,\n      temp_min_c: input.daily.temperature_2m_min ? input.daily.temperature_2m_min[i] : null,\n      precip_prob_max: input.daily.precipitation_probability_max ? input.daily.precipitation_probability_max[i] : null,\n      weather_code: input.daily.weather_code ? input.daily.weather_code[i] : null\n    });\n  }\n  if (daily.length) {\n    const cur = input.current || {};\n    weather = {\n      location_name: base.resolved_name || base.destination,\n      current: cur.temperature_2m != null ? {\n        temperature_c: cur.temperature_2m,\n        weather_code: cur.weather_code != null ? cur.weather_code : null,\n        observed_at: null\n      } : null,\n      daily\n    };\n  } else {\n    weather_message = 'Forecast is only available within 16 days of travel.';\n  }\n} else {\n  weather_message = 'Weather forecast unavailable right now.';\n}\nreturn [{ json: Object.assign({}, base, { weather, weather_message }) }];\n"
+      },
+      "id": "merge-weather",
+      "name": "Merge Weather",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $input.first().json;\nconst placeLines = (base.places || []).map(p =>\n  '- ' + p.name + (p.category ? ' (' + p.category + ')' : '') + ' @ ' + p.lat + ',' + p.lon\n).join('\\n') || '(no candidates found)';\nconst weatherText = base.weather ? JSON.stringify(base.weather) : (base.weather_message || 'unavailable');\nconst stops = (base.user_stops || []).map(s => s.name).join(', ') || 'none';\nconst prompt = [\n  'You are TravelMate, an expert trip planner. Create a realistic day-by-day itinerary.',\n  '',\n  'Trip:',\n  '- From: ' + base.origin,\n  '- Destination: ' + base.destination,\n  '- Dates: ' + base.start_date + ' to ' + base.end_date + ' (' + base.duration_days + ' days)',\n  '- Travellers: ' + base.traveller_count,\n  '- Total budget: ' + base.budget + ' ' + base.currency,\n  '- Interests: ' + (base.preferences || 'general sightseeing'),\n  '- Transport preference: ' + base.transport_preference,\n  '- Accommodation preference: ' + base.accommodation_preference,\n  '- Must include these user stops: ' + stops,\n  '',\n  'Candidate places (prefer these; use exact names and coordinates):',\n  placeLines,\n  '',\n  'Weather forecast:',\n  weatherText,\n  '',\n  'Rules:',\n  '- Return ONLY valid JSON. No markdown, no code fences, no commentary.',\n  '- Exactly ' + base.duration_days + ' day objects with day_number 1..' + base.duration_days + '.',\n  '- 3 to 5 activities per day. Prefer real places from the candidate list. Never invent place names, prices, or weather.',\n  '- itinerary item fields: day_number, activity_name, description, location, start_time \"HH:MM\", end_time \"HH:MM\", estimated_cost (decimal string, no currency symbol), latitude, longitude, sort_order.',\n  '- Use the candidate coordinates for matching places; otherwise null.',\n  '- days: one entry per day with day_number, title, summary, stop_name.',\n  '- expenses: realistic allocation with categories only from transport, accommodation, food, activities, local_transport, misc. Fields: category, description, amount (decimal string).',\n  '- stops: 2 to 6 areas or neighbourhoods. Fields: name, latitude, longitude (from candidates when possible).',\n  '- hero_quote (max 200 chars) and hero_quote_author (max 80 chars).',\n  '',\n  'Return this JSON shape:',\n  '{\"itinerary\":[],\"days\":[],\"expenses\":[],\"stops\":[],\"hero_quote\":\"\",\"hero_quote_author\":\"\"}'\n].join('\\n');\nreturn [{ json: Object.assign({}, base, { prompt }) }];\n"
+      },
+      "id": "build-prompt",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $env.GEMINI_MODEL || 'gemini-2.5-flash' }}:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "={{ $env.GEMINI_API_KEY }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: $json.prompt }] }], generationConfig: { temperature: 0.7, responseMimeType: 'application/json' } }) }}",
+        "options": {}
+      },
+      "id": "gemini",
+      "name": "Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1720,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Merge Weather').first().json;\nconst input = $input.first().json || {};\nconst coord = v => {\n  if (v == null || v === '') return null;\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n};\nlet text = '';\ntry {\n  text = (input.candidates[0].content.parts || []).map(p => p.text || '').join('');\n} catch (e) {\n  text = '';\n}\nif (!text) throw new Error('Gemini returned no content');\ntext = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();\nlet data;\ntry {\n  data = JSON.parse(text);\n} catch (e) {\n  throw new Error('Gemini returned invalid JSON');\n}\nconst maxDay = Math.max(1, Number(base.duration_days) || 1);\nconst itinerary = (Array.isArray(data.itinerary) ? data.itinerary : []).map((r, i) => {\n  const rawDay = Number(r.day_number);\n  const day = Number.isFinite(rawDay) ? Math.min(maxDay, Math.max(1, Math.round(rawDay))) : 1;\n  const start = /^\\d{1,2}:\\d{2}$/.test(String(r.start_time || '')) ? r.start_time : null;\n  const end = /^\\d{1,2}:\\d{2}$/.test(String(r.end_time || '')) ? r.end_time : null;\n  return {\n    day_number: day,\n    activity_name: String(r.activity_name || '').trim(),\n    description: r.description || null,\n    location: r.location || null,\n    start_time: start,\n    end_time: end,\n    estimated_cost: r.estimated_cost != null ? String(r.estimated_cost) : '0.00',\n    latitude: coord(r.latitude),\n    longitude: coord(r.longitude),\n    sort_order: Number.isFinite(Number(r.sort_order)) ? Number(r.sort_order) : i\n  };\n}).filter(r => r.activity_name);\nif (!itinerary.length) throw new Error('Gemini returned no valid activities');\nconst expenses = (Array.isArray(data.expenses) ? data.expenses : []).map(r => ({\n  category: String(r.category || 'misc'),\n  description: r.description || null,\n  amount: r.amount != null ? String(r.amount) : null\n})).filter(r => r.amount && Number(r.amount) > 0);\nconst days = (Array.isArray(data.days) ? data.days : []).map(r => ({\n  day_number: Number(r.day_number) || 1,\n  title: r.title || null,\n  summary: r.summary || null,\n  stop_name: r.stop_name || null\n}));\nconst stops = (Array.isArray(data.stops) ? data.stops : []).map(r => ({\n  name: String(r.name || '').trim(),\n  latitude: coord(r.latitude),\n  longitude: coord(r.longitude)\n})).filter(r => r.name);\nconst payload = {\n  generation_id: base.generation_id,\n  status: 'Completed',\n  itinerary,\n  days,\n  expenses,\n  stops,\n  latitude: base.latitude != null ? base.latitude : null,\n  longitude: base.longitude != null ? base.longitude : null,\n  hero_quote: data.hero_quote ? String(data.hero_quote).slice(0, 200) : null,\n  hero_quote_author: data.hero_quote_author ? String(data.hero_quote_author).slice(0, 80) : null\n};\nif (base.weather) {\n  payload.weather = base.weather;\n} else if (base.weather_message) {\n  payload.weather = {\n    location_name: base.resolved_name || base.destination,\n    current: null,\n    daily: [],\n    weather_message: base.weather_message\n  };\n}\nreturn [{ json: { callback_url: base.callback_url, payload } }];\n"
+      },
+      "id": "parse-gemini",
+      "name": "Parse Gemini",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst base = $('Validate & Prepare').first().json;\nconst input = $input.first().json || {};\nlet message = 'Itinerary generation failed. Please retry.';\nif (input.error) {\n  message = input.error.message || input.error.description || String(input.error);\n} else if (input.message) {\n  message = input.message;\n}\nreturn [{ json: { callback_url: base.callback_url, payload: {\n  generation_id: base.generation_id,\n  status: 'Failed',\n  error_message: String(message).slice(0, 500)\n} } }];\n"
+      },
+      "id": "build-failed",
+      "name": "Build Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.callback_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.INTERNAL_WEBHOOK_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "callback",
+      "name": "Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate & Prepare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Prepare": {
+      "main": [
+        [
+          {
+            "node": "Geocode Destination",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Geocode Destination": {
+      "main": [
+        [
+          {
+            "node": "Merge Geocode",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Geocode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Geocode": {
+      "main": [
+        [
+          {
+            "node": "Places",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Places": {
+      "main": [
+        [
+          {
+            "node": "Merge Places",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Places",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Places": {
+      "main": [
+        [
+          {
+            "node": "Weather",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weather": {
+      "main": [
+        [
+          {
+            "node": "Merge Weather",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Weather",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Weather": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "main": [
+        [
+          {
+            "node": "Parse Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Gemini": {
+      "main": [
+        [
+          {
+            "node": "Callback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Failed": {
+      "main": [
+        [
+          {
+            "node": "Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b0f6c2d4-1f2a-4c3b-9d8e-7a6b5c4d3e2f",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

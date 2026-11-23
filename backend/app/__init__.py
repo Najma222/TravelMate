@@ -14,6 +14,12 @@ def create_app(config_name: str | None = None) -> Flask:
     app.config.from_object(cfg)
     app.json.sort_keys = False
 
+    if app.config.get("TRUSTED_PROXIES", 0) > 0:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+
+        n = app.config["TRUSTED_PROXIES"]
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=n, x_proto=n, x_host=n)
+
     from app.extensions import bcrypt, db, limiter, migrate
     from app.middleware.origin_check import init_origin_check
     from app.middleware.request_id import init_request_id

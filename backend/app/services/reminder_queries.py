@@ -30,6 +30,8 @@ def _trip_block(t: Trip, t0) -> dict:
         "end_date": t.end_date.isoformat(),
         "status": t.status,
         "days_until_start": (t.start_date - t0).days,
+        "latitude": float(t.latitude) if t.latitude is not None else None,
+        "longitude": float(t.longitude) if t.longitude is not None else None,
     }
 
 
@@ -61,8 +63,6 @@ def active_trips() -> list[dict]:
     for t, u in rows:
         block = _trip_block(t, t0)
         block["day_number"] = (t0 - t.start_date).days + 1
-        block["latitude"] = float(t.latitude) if t.latitude is not None else None
-        block["longitude"] = float(t.longitude) if t.longitude is not None else None
         block["weather_updated_at"] = iso(t.weather_updated_at)
         out.append({**block, "user": _user_block(u)})
     return out

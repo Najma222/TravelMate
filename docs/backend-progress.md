@@ -37,7 +37,8 @@ Last updated: 2026-11-23. Test suite: `cd backend && python -m pytest` (PostgreS
 | Internal endpoints + reminder queries | `blueprints/internal.py`, `services/reminder_queries.py` | TESTED | `test_notifications.py`, `test_generation.py`, `test_callback.py` | — |
 | Media uploads (D14) | `services/upload_service.py`, `blueprints/media.py` | TESTED | `test_uploads.py` | — |
 | CLI: seed-discover / seed-demo / simulate-callback | `app/cli.py` | TESTED | `test_cli.py` | — |
-| Docker Compose (db, backend, n8n) | `docker-compose.yml`, `backend/Dockerfile`, `backend/entrypoint.sh` | TESTED | Manual: `up --build`, all healthy, smoke test, restart persistence | — |
+| Docker Compose (db, backend, web, n8n, n8n-init) | `docker-compose.yml`, `backend/Dockerfile`, `frontend/Dockerfile`, `backend/entrypoint.sh` | TESTED | Manual: `up --build`, all healthy, smoke test, restart persistence | nginx `web` serves pages and proxies `/api` + `/media` |
 | API docs (contract, OpenAPI, Postman) | `docs/*`, `backend/scripts/gen_api_docs.py` | TESTED | `test_docs.py` (route parity + OpenAPI validation) | — |
-| n8n workflows | n8n (not in repo) | NOT_STARTED | — | Out of backend scope; contract in `integration-decisions.md` |
-| Frontend integration | — | NOT_STARTED | — | See `integration-checklist.md` |
+| n8n trip-generation workflow | `n8n/workflows/travelmate-trip-generate.json`, compose `n8n-init` | IMPLEMENTED | Imported + published + webhook executed in n8n 2.48.6 (dummy keys → Failed callback path) | Live itinerary output needs `GEMINI_API_KEY` + `GEOAPIFY_API_KEY` |
+| Frontend integration | `frontend/assets/js/api.js`, `frontend/nginx.conf`, `frontend/Dockerfile` | IMPLEMENTED | Request/response adapter checked against every page; same-origin proxy tested | Browser E2E pending user API keys |
+| n8n weather-refresh / reminder / booking-gap cron workflows | — | NOT_STARTED | — | Optional; generation already stores weather in its callback |

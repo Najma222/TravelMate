@@ -36,6 +36,8 @@ services:
       UPLOAD_DIR: /app/uploads
       N8N_TRIP_WEBHOOK_URL: ${N8N_TRIP_WEBHOOK_URL:-http://n8n:5678/webhook/trip-generate}
       BACKEND_INTERNAL_URL: http://backend:5000
+      # nginx (the web service) is one trusted reverse proxy in front of Flask.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-1}
     depends_on:
       db:
         condition: service_healthy
@@ -43,6 +45,35 @@ services:
       - "${BACKEND_PORT:-5000}:5000"
     volumes:
       - uploads:/app/uploads
+    networks:
+      - travelmate-net
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - travelmate-net
+
+  n8n-init:
+    image: docker.n8n.io/n8nio/n8n
+    restart: "no"
+    environment:
+      TZ: Asia/Kolkata
+      GENERIC_TIMEZONE: Asia/Kolkata
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    entrypoint: ["/bin/sh", "-c"]
+    # Preserve the workflow's active flag from the checked-in JSON. Re-running this
+    # import updates the workflow by its stable id instead of creating a duplicate.
+    command: ["n8n import:workflow --input=/workflows/travelmate-trip-generate.json --activeState=fromJson"]
     networks:
       - travelmate-net
 
@@ -55,15 +86,21 @@ services:
       TZ: Asia/Kolkata
       GENERIC_TIMEZONE: Asia/Kolkata
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
-      WEBHOOK_URL: http://localhost:5678/
+      WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678/}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       BACKEND_URL: http://backend:5000
       INTERNAL_WEBHOOK_SECRET: ${INTERNAL_WEBHOOK_SECRET}
       GEOAPIFY_API_KEY: ${GEOAPIFY_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       ORS_API_KEY: ${ORS_API_KEY:-}
     volumes:
       - n8n_data:/home/node/.n8n
+    depends_on:
+      n8n-init:
+        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz >/dev/null 2>&1 || exit 1"]
       interval: 15s
