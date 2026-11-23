@@ -212,6 +212,7 @@ function adaptResponse(path,method,data){
 }
 
 function errorFrom(data,status){
+ if(status===501)return{message:'The frontend server does not proxy API requests. Run docker compose or python frontend/dev_server.py.',status};
  const err=data&&data.error;
  if(err){
   let message=err.message||'Request failed';

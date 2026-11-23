@@ -129,6 +129,20 @@ localStorage.tm_mock = '1';
 Switch back with `localStorage.removeItem('tm_mock')`. Mock data lives in `localStorage`;
 `localStorage.clear()` resets it.
 
+**Local frontend with the real backend.** Do not use `python -m http.server` for the real
+API: Python's basic static server returns `501 Not Implemented` for login and registration
+because it cannot proxy `POST` requests. Start the database/backend with Docker, then run the
+included development proxy from the repository root:
+
+```powershell
+docker compose up -d db backend
+python frontend/dev_server.py
+```
+
+Open <http://127.0.0.1:8080/>. The proxy serves the HTML/CSS and forwards `/api`, `/media`,
+and `/health` to `http://127.0.0.1:5000`. For the complete stack, use `docker compose up
+--build -d` and open <http://localhost:8080/> instead; nginx performs the same proxying.
+
 **How the pages talk to the API.** The pages were written against the sample-data shapes.
 `frontend/assets/js/api.js` contains one translation layer that maps the Flask envelopes and
 field names (`{"items": [...]}`, `traveller_count`, `booking_type`, `latitude`, …) to the
