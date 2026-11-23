@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - travelmate-net
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    networks:
+      - travelmate-net
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      TZ: Asia/Kolkata
+      GENERIC_TIMEZONE: Asia/Kolkata
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      WEBHOOK_URL: http://localhost:5678/
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      BACKEND_URL: http://backend:5000
+      INTERNAL_WEBHOOK_SECRET: ${INTERNAL_WEBHOOK_SECRET}
+      GEOAPIFY_API_KEY: ${GEOAPIFY_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ORS_API_KEY: ${ORS_API_KEY:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - travelmate-net
+
+volumes:
+  pgdata:
+  n8n_data:
+
+networks:
+  travelmate-net:
