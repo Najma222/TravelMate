@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your trips · TravelMate</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"><link href="assets/css/fun.css" rel="stylesheet"></head><body>
+<div id="bar"></div><header class="top"><a class="logo" href="dashboard.html">✈ TravelMate</a>
+<nav aria-label="Main"><a href="dashboard.html">Dashboard</a><a class="on" href="trips.html">Your Trips</a><a  href="notifications.html">Reminders</a></nav>
+<div class="d-flex gap-2 align-items-center"><a class="cta" href="trip-new.html">+ New Trip</a><button class="ghost" id="out">Log out</button></div></header>
+<main class="pg"><h1 class="rv">Your trips</h1><p class="lead rv" style="--d:.1s">Every plan in one place.</p>
+<div class="fil rv" style="--d:.2s" id="fil"><button class="on" data-f="all">All</button><button data-f="up">Upcoming</button><button data-f="past">Past</button></div><div class="tg" id="tg"></div></main>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script><script src="assets/js/api.js"></script><script src="assets/js/app.js"></script>
+<script>guard();$('#out').onclick=async()=>{await api('/auth/logout',{method:'POST'});sessionStorage.clear();location.href='login.html'};
+const reveal=()=>{const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.1});$$('.rv:not(.in)').forEach(el=>io.observe(el))};
+addEventListener('scroll',()=>{$('#bar').style.width=scrollY/Math.max(1,document.body.scrollHeight-innerHeight)*100+'%'},{passive:true});
+const cols=['var(--coral)','var(--mint)','var(--mango)','var(--lilac)'];let all=[],f='all';
+const today=new Date().toISOString().slice(0,10);
+function draw(){const ts=all.filter(t=>f==='all'||(f==='up')===(t.end_date>=today));
+ $('#tg').innerHTML=ts.map((t,i)=>{const d=daysLeft(t.start_date);return`<a class="tc rv" style="background:${cols[i%4]};--d:${i*.08}s" href="trip.html?id=${t.id}"><span class="dn">${d||''}</span><span class="pill2">${esc(t.status)}</span><h3>${esc(t.destination)}</h3><p>from ${esc(t.origin)}</p><div class="tb"><span>${t.start_date}<br>to ${t.end_date}</span><span><b>${inr(t.budget)}</b><br>${d?d+' days to go':t.end_date<today?'Trip finished':'Happening now'}</span></div></a>`}).join('')+'<a class="tc add rv" href="trip-new.html">+ Plan a new trip</a>';reveal()}
+$('#fil').onclick=e=>{if(!e.target.dataset.f)return;f=e.target.dataset.f;$$('#fil button').forEach(b=>b.classList.toggle('on',b===e.target));draw()};
+api('/trips').then(ts=>{all=ts;draw();reveal()});</script></body></html>

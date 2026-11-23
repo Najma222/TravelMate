@@ -113,11 +113,12 @@ All of these routes require the same `X-Webhook-Secret` header. Missing or inval
 | --- | --- |
 | `POST /api/internal/trips/{id}/result` | Save a completed or failed generation result as specified above. |
 | `GET /api/internal/upcoming-trips?days=7,2` | Return trips due for reminders only, including the trip/user identifiers, destination and dates, user email and notification preferences, and reminder type (`7_day` or `2_day`). Exclude reminders already recorded. |
+| `GET /api/internal/weather-trips?days=5` | Return trips starting within the next 1–5 days that have an enabled notification channel and usable coordinates. Coordinates come from the reminder trip record or the first geocoded itinerary activity. Exclude weather alerts already recorded for today's scheduled run. |
 | `POST /api/internal/notifications` | Record an attempted notification, including trip/user IDs, type, message, scheduled time, sent time, and delivery status (`sent` or `failed`). |
 
 ### Notification duplicate protection
 
-Flask owns de-duplication. Add a database unique constraint on `(trip_id, notification_type, scheduled_at)`, where `scheduled_at` identifies the reminder occurrence (stored in a consistent timezone, preferably UTC). On a duplicate insert, return HTTP `409 Conflict`; n8n treats that response as “already recorded” and does not send a second notification. `sent_at` records the actual delivery attempt time and is not the idempotency key.
+Flask owns de-duplication. A database unique constraint on `(trip_id, notification_type, scheduled_at)` identifies an occurrence (stored in UTC). Supported types are `7_day`, `2_day`, and `weather_alert`. On a duplicate insert, return HTTP `409 Conflict`; n8n treats that response as “already recorded” and does not send a second notification. `sent_at` records the actual delivery attempt time and is not the idempotency key.
 
 To avoid a send/log race, the workflow should check the upcoming-trips response before sending, then record the notification. Person 1 must confirm whether the notification row is written before or after external delivery and how a failed delivery is retried without duplicating a successful send.
 

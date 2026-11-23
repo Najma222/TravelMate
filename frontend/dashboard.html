@@ -1,0 +1,54 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard · TravelMate</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"><link href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
+<link href="assets/css/fun.css" rel="stylesheet"></head><body>
+<div id="bar"></div>
+<header class="top"><a class="logo" href="dashboard.html">✈ TravelMate</a>
+<nav aria-label="Main"><a class="on" href="dashboard.html">Dashboard</a><a href="trips.html">Your Trips</a><a href="notifications.html">Reminders</a></nav>
+<div class="d-flex gap-2 align-items-center"><a class="cta" href="trip-new.html">+ New Trip</a><button class="ghost" id="out">Log out</button></div></header>
+<main id="m"></main>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script><script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script><script src="assets/js/api.js"></script><script src="assets/js/app.js"></script>
+<script>
+guard();$('#out').onclick=async()=>{await api('/auth/logout',{method:'POST'});sessionStorage.clear();location.href='login.html'};
+const reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+const wxIcon=c=>/rain|shower/i.test(c)?'🌧️':/cloud|mist|fog/i.test(c)?'⛅':/clear|sun/i.test(c)?'☀️':'🌤️';
+function count(el){const n=+el.dataset.n,f=el.dataset.f==='inr',s=v=>f?inr(Math.round(v)):Math.round(v);if(reduce){el.textContent=s(n);return}
+ const t0=performance.now();(function s2(t){const p=Math.min(1,(t-t0)/1400),e=1-Math.pow(1-p,3);el.textContent=s(n*e);if(p<1)requestAnimationFrame(s2)})(t0)}
+(async()=>{
+ const trips=await api('/trips'),q=new URLSearchParams(location.search).get('t');
+ const t=trips.find(x=>x.id==q)||trips.find(x=>x.status==='Completed')||trips[0];
+ if(!t){$('#m').innerHTML='<section class="hero"><div class="blob b1"></div><h1 class="disp" style="font-size:clamp(3rem,9vw,7rem)">Where to next?</h1><p class="sub">You have no trips yet.</p><a class="cta" style="justify-self:start" href="trip-new.html">Plan your first trip</a></section>';return}
+ const ready=t.status==='Completed';let ex=[],bk=[],it=[],pl=[],w={available:false};
+ const P=`/trips/${t.id}/`;
+ if(ready)[ex,bk,it,pl,w]=await Promise.all(['expenses','bookings','itinerary','places','weather'].map(k=>api(P+k)));
+ const nt=await api('/notifications');
+ const spent=ex.reduce((a,e)=>a+e.amount,0),left=t.budget-spent,pct=Math.min(100,spent/t.budget*100),mx=Math.max(1,...ex.map(e=>e.amount)),dl=daysLeft(t.start_date);
+ const cols=['coralc','mint','lilac','cream'].map(c=>({coralc:'var(--coral)',mint:'var(--mint)',lilac:'var(--lilac)',cream:'var(--mango)'}[c]));
+ const names=(pl.length?pl.map(p=>p.name):[t.destination,'Your next adventure']);
+ const mq=[...names,...names,...names,...names].map(n=>esc(n)+' ✦ ').join('');
+ $('#m').innerHTML=`
+ <header class="hero"><div class="blob b1" data-p=".25"></div><div class="blob b2" data-p="-.15"></div><div class="blob b3" data-p=".1"></div>
+  <div class="chips">${trips.map(x=>`<a class="chip ${x.id==t.id?'on':''}" href="?t=${x.id}">${esc(x.destination)}</a>`).join('')}</div>
+  <h1 id="dest" aria-label="${esc(t.destination)}">${[...t.destination].map((c,i)=>`<span style="--i:${i}" aria-hidden="true">${c===' '?'&nbsp;':esc(c)}</span>`).join('')}</h1>
+  <p class="sub">${esc(t.origin)} → ${esc(t.destination)} · ${t.start_date} to ${t.end_date} · ${t.travellers} traveller${t.travellers>1?'s':''}</p>
+  <div><a class="cta" href="trip.html?id=${t.id}">Open trip</a></div>
+  <div class="sticker" role="img" aria-label="${dl} days to go"><b data-n="${dl}">0</b><span>days to go</span></div><div class="hint">scroll ↓</div></header>
+ <div class="marq" aria-hidden="true"><div>${mq}</div></div>
+ <section class="sec"><h2 class="rv">Your money</h2><div class="two">
+  <div class="card cream rv"><div class="ringw"><svg class="ring" viewBox="0 0 120 120" role="img" aria-label="${Math.round(pct)}% of budget spent"><circle class="t" cx="60" cy="60" r="54"/><circle class="v" cx="60" cy="60" r="54" style="--o:${339.3*(1-pct/100)}"/></svg>
+   <div><div class="muted">Budget ${inr(t.budget)}</div><div class="big" data-n="${spent}" data-f="inr">0</div><div class="muted">spent so far · ${left>=0?inr(left)+' left':inr(-left)+' over budget'}</div></div></div></div>
+  <div class="card deep rv" style="--d:.12s"><h3>Where it goes</h3>${ex.map(e=>`<div class="ex"><div class="l"><span>${esc(e.label)}<span class="tag">${e.is_confirmed?'Confirmed':'Estimated'}</span></span><b>${inr(e.amount)}</b></div><div class="bar"><i style="--w:${e.amount/mx*100}%"></i></div></div>`).join('')||'<p class="muted">No expenses yet.</p>'}<a href="trip.html?id=${t.id}#budget" class="muted">+ Record an expense</a></div></div></section>
+ <section class="sec"><h2 class="rv">Day by day</h2>${it.length?`<div class="track">${it.map((d,i)=>`<article class="day rv" style="background:${cols[i%4]};--d:${i*.1}s"><b>${d.day_number}</b><h3>${esc(d.title)}</h3><ul>${d.items.map(x=>`<li><small>${esc(x.time)}</small>${esc(x.activity)}</li>`).join('')}</ul></article>`).join('')}</div><p class="dots">Swipe or scroll sideways →</p>`:`<div class="card deep rv"><p>${ready?'No itinerary yet.':'Your itinerary is still being built.'} <a href="trip.html?id=${t.id}">Check progress</a></p></div>`}</section>
+ <section class="sec"><h2 class="rv">The lay of the land</h2><div class="two"><div class="rv"><div id="map" role="img" aria-label="Map of places on this trip"></div></div>
+  <div class="card lilac rv" style="--d:.12s"><h3>Weather in ${esc(t.destination)}</h3>${w.available?`<span class="emoji">${wxIcon(w.condition)}</span><div class="temp">${w.temp}°</div><p>${esc(w.condition)} · High ${w.high}° / Low ${w.low}° · ${w.rain_prob}% rain</p><p class="muted">${esc(w.suggestion)}</p>`:'<p>Forecast isn’t available for these dates yet. Check back closer to your trip.</p>'}</div></div></section>
+ <section class="sec"><div class="two"><div class="card mint rv"><h3>Bookings</h3>${bk.map(b=>`<div class="row"><span>${esc(b.provider)} · ${esc(b.type)}</span><span class="pill">${esc(b.status)}</span></div>`).join('')||'<p>Nothing saved yet. Add a booking from the trip page.</p>'}</div>
+  <div class="card coralc rv" style="--d:.12s"><h3>Reminders</h3>${nt.map(n=>`<div class="row"><span>${esc(n.notification_type)}</span><span class="pill">${esc(n.delivery_status)}</span></div>`).join('')||'<p>No reminders yet.</p>'}<p style="margin:14px 0 0"><a href="notifications.html"><b>Manage reminders</b></a></p></div></div></section>
+ <footer>Plan smarter. Travel better.</footer>`;
+ // reveal + counters
+ const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');$$('[data-n]',e.target).forEach(count);io.unobserve(e.target)}}),{threshold:.15});
+ $$('.rv').forEach(el=>io.observe(el));$$('.sticker b').forEach(count);
+ // scroll progress + parallax
+ const blobs=$$('.blob');let tick=false;addEventListener('scroll',()=>{if(tick)return;tick=true;requestAnimationFrame(()=>{const y=scrollY;$('#bar').style.width=(y/(document.body.scrollHeight-innerHeight)*100)+'%';if(!reduce)blobs.forEach(b=>b.style.translate=`0 ${y*b.dataset.p}px`);tick=false})},{passive:true});
+ drawMap('map',pl);
+})();
+</script></body></html>

@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>New trip · TravelMate</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet"><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"><link href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"><link href="assets/css/fun.css" rel="stylesheet"></head>
+<body><div class="shell"><div id="nav"></div>
+<form id="f" class="c mt-4 mx-auto" style="max-width:720px" novalidate><h5 class="fw-bold mb-3">Plan a trip</h5><div class="row g-3">
+<div class="col-md-6"><label class="form-label" for="origin">From</label><input id="origin" class="form-control" required></div>
+<div class="col-md-6"><label class="form-label" for="destination">To</label><input id="destination" class="form-control" required></div>
+<div class="col-md-6"><label class="form-label" for="start_date">Start date</label><input id="start_date" type="date" class="form-control" required></div>
+<div class="col-md-6"><label class="form-label" for="end_date">End date</label><input id="end_date" type="date" class="form-control" required></div>
+<div class="col-md-6"><label class="form-label" for="budget">Budget (₹)</label><input id="budget" type="number" min="1" class="form-control" required></div>
+<div class="col-md-6"><label class="form-label" for="travellers">Travellers</label><input id="travellers" type="number" min="1" value="1" class="form-control" required></div>
+<div class="col-md-6"><label class="form-label" for="transport_pref">Transport</label><select id="transport_pref" class="form-select"><option>Any</option><option>Flight</option><option>Train</option><option>Bus</option></select></div>
+<div class="col-md-6"><label class="form-label" for="stay_pref">Stay</label><select id="stay_pref" class="form-select"><option>Any</option><option>Hotel</option><option>Hostel</option><option>Homestay</option></select></div>
+<div class="col-12"><label class="form-label" for="preferences">Interests</label><input id="preferences" class="form-control" placeholder="beaches, history, food"></div></div>
+<div id="err" class="text-danger small mt-3" role="alert"></div><button id="go" class="btn-green mt-3">Create trip &amp; generate itinerary</button></form>
+</div><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script><script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script><script src="assets/js/api.js"></script><script src="assets/js/app.js"></script>
+<script>guard();nav('');const today=new Date().toISOString().slice(0,10);$('#start_date').min=today;
+$('#f').onsubmit=async e=>{e.preventDefault();const v=Object.fromEntries($$('input,select',e.target).map(i=>[i.id,i.value.trim()]));
+const bad=!v.origin||!v.destination?'Enter origin and destination.':!v.start_date||v.start_date<today?'Start date can’t be in the past.':v.end_date<v.start_date?'End date must be on or after the start date.':+v.budget<=0?'Budget must be more than 0.':+v.travellers<1?'At least 1 traveller is required.':'';
+if(bad)return $('#err').textContent=bad;$('#err').textContent='';$('#go').disabled=true;
+try{const t=await api('/trips',{method:'POST',body:{...v,budget:+v.budget,travellers:+v.travellers}});await api(`/trips/${t.id}/generate`,{method:'POST'});location.href=`trip.html?id=${t.id}`}catch{$('#go').disabled=false}}</script></body></html>

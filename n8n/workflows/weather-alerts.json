@@ -1,0 +1,70 @@
+{
+  "name": "Weather Alerts",
+  "nodes": [
+    {
+      "parameters": {"rule": {"interval": [{"field": "cronExpression", "expression": "0 8 * * *"}]}},
+      "id": "weather-schedule", "name": "Daily at 08:00 Asia Kolkata", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 0]
+    },
+    {
+      "parameters": {"url": "={{ $env.BACKEND_URL }}/api/internal/weather-trips?days=5", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "X-Webhook-Secret", "value": "={{ $env.INTERNAL_WEBHOOK_SECRET }}"}]}, "options": {}},
+      "id": "get-weather-trips", "name": "Get trips starting within 5 days", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [220, 0]
+    },
+    {
+      "parameters": {"fieldToSplitOut": "trips", "options": {}},
+      "id": "split-weather-trips", "name": "Loop over weather trips", "type": "n8n-nodes-base.splitOut", "typeVersion": 1, "position": [440, 0]
+    },
+    {
+      "parameters": {"url": "https://api.open-meteo.com/v1/forecast", "sendQuery": true, "queryParameters": {"parameters": [{"name": "latitude", "value": "={{ $json.latitude }}"}, {"name": "longitude", "value": "={{ $json.longitude }}"}, {"name": "daily", "value": "weather_code,precipitation_probability_max,temperature_2m_max"}, {"name": "forecast_days", "value": "6"}, {"name": "timezone", "value": "Asia/Kolkata"}]}, "options": {}},
+      "id": "open-meteo", "name": "Get Open-Meteo forecast", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [660, 0]
+    },
+    {
+      "parameters": {"mode": "runOnceForAllItems", "jsCode": "const forecasts = $input.all();\nconst trips = $('Loop over weather trips').all();\nreturn forecasts.map((forecast, index) => {\n  const trip = trips[index].json;\n  const daily = forecast.json.daily || {};\n  const days = (daily.time || []).map((date, i) => ({date, precipitation: daily.precipitation_probability_max?.[i], code: daily.weather_code?.[i], high: daily.temperature_2m_max?.[i]}));\n  const inTrip = days.filter(d => d.date >= trip.start_date && d.date <= trip.end_date);\n  const risky = inTrip.filter(d => (Number.isFinite(d.precipitation) && d.precipitation >= 60) || (Number.isFinite(d.code) && d.code >= 95) || (Number.isFinite(d.high) && d.high >= 40));\n  const details = risky.map(d => { const reasons=[]; if (d.precipitation >= 60) reasons.push(`rain chance ${d.precipitation}%`); if (d.code >= 95) reasons.push(`thunderstorm weather code ${d.code}`); if (d.high >= 40) reasons.push(`high temperature ${d.high}°C`); return `${d.date}: ${reasons.join(', ')}`; });\n  const message = `Weather alert for your trip to ${trip.destination} (${trip.start_date} to ${trip.end_date}). Forecast warning: ${details.join('; ')}. Please check the forecast and plan accordingly.`;\n  return {json: {...trip, alert: risky.length > 0, message, notification_type: 'weather_alert'}, pairedItem: {item: index}};\n});"},
+      "id": "build-weather-alert", "name": "Evaluate forecast and build alert", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [880, 0]
+    },
+    {
+      "parameters": {"conditions": {"options": {"caseSensitive": true, "typeValidation": "strict", "version": 2}, "conditions": [{"leftValue": "={{ $json.alert }}", "rightValue": true, "operator": {"type": "boolean", "operation": "equals"}}], "combinator": "and"}, "options": {}},
+      "id": "if-weather-alert", "name": "Weather threshold reached?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [1100, 0]
+    },
+    {
+      "parameters": {"mode": "runOnceForAllItems", "jsCode": "return $input.all().flatMap((item, index) => { const alert = item.json; const channels=[]; if (alert.notify_email && alert.email) channels.push('email'); if (alert.notify_telegram && alert.telegram_chat_id) channels.push('telegram'); return channels.map(channel => ({json: {...alert, channel}, pairedItem: {item: index}})); });"},
+      "id": "expand-weather-channels", "name": "Select enabled channels", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1320, -120]
+    },
+    {
+      "parameters": {"rules": {"values": [{"conditions": {"options": {"caseSensitive": true, "typeValidation": "strict", "version": 2}, "conditions": [{"leftValue": "={{ $json.channel }}", "rightValue": "email", "operator": {"type": "string", "operation": "equals"}}], "combinator": "and"}}, {"conditions": {"options": {"caseSensitive": true, "typeValidation": "strict", "version": 2}, "conditions": [{"leftValue": "={{ $json.channel }}", "rightValue": "telegram", "operator": {"type": "string", "operation": "equals"}}], "combinator": "and"}}]}, "options": {}},
+      "id": "route-weather-channel", "name": "Route by channel", "type": "n8n-nodes-base.switch", "typeVersion": 3.2, "position": [1540, -120]
+    },
+    {
+      "parameters": {"fromEmail": "={{ $env.REMINDER_FROM_EMAIL }}", "toEmail": "={{ $json.email }}", "subject": "={{ 'Weather alert for ' + $json.destination }}", "emailFormat": "text", "text": "={{ $json.message }}", "options": {}},
+      "id": "send-weather-email", "name": "Send weather alert email", "type": "n8n-nodes-base.emailSend", "typeVersion": 2.1, "position": [1760, -240], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {"chatId": "={{ $json.telegram_chat_id }}", "text": "={{ $json.message }}", "additionalFields": {}},
+      "id": "send-weather-telegram", "name": "Send weather alert Telegram", "type": "n8n-nodes-base.telegram", "typeVersion": 1.2, "position": [1760, 0], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {"method": "POST", "url": "={{ $env.BACKEND_URL }}/api/internal/notifications", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "X-Webhook-Secret", "value": "={{ $env.INTERNAL_WEBHOOK_SECRET }}"}]}, "sendBody": true, "specifyBody": "json", "jsonBody": "={{ JSON.stringify({trip_id: $('Evaluate forecast and build alert').item.json.trip_id, user_id: $('Evaluate forecast and build alert').item.json.user_id, notification_type: 'weather_alert', message: $('Evaluate forecast and build alert').item.json.message, scheduled_at: $('Evaluate forecast and build alert').item.json.scheduled_at, sent_at: new Date().toISOString(), delivery_status: 'sent'}) }}", "options": {"response": {"response": {"neverError": true, "responseFormat": "json"}}}},
+      "id": "record-weather-email", "name": "Record email delivery (ignore 409)", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [2000, -240], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {"method": "POST", "url": "={{ $env.BACKEND_URL }}/api/internal/notifications", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "X-Webhook-Secret", "value": "={{ $env.INTERNAL_WEBHOOK_SECRET }}"}]}, "sendBody": true, "specifyBody": "json", "jsonBody": "={{ JSON.stringify({trip_id: $('Evaluate forecast and build alert').item.json.trip_id, user_id: $('Evaluate forecast and build alert').item.json.user_id, notification_type: 'weather_alert', message: $('Evaluate forecast and build alert').item.json.message, scheduled_at: $('Evaluate forecast and build alert').item.json.scheduled_at, sent_at: new Date().toISOString(), delivery_status: 'sent'}) }}", "options": {"response": {"response": {"neverError": true, "responseFormat": "json"}}}},
+      "id": "record-weather-telegram", "name": "Record Telegram delivery (ignore 409)", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [2000, 0], "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily at 08:00 Asia Kolkata": {"main": [[{"node": "Get trips starting within 5 days", "type": "main", "index": 0}]]},
+    "Get trips starting within 5 days": {"main": [[{"node": "Loop over weather trips", "type": "main", "index": 0}]]},
+    "Loop over weather trips": {"main": [[{"node": "Get Open-Meteo forecast", "type": "main", "index": 0}]]},
+    "Get Open-Meteo forecast": {"main": [[{"node": "Evaluate forecast and build alert", "type": "main", "index": 0}]]},
+    "Evaluate forecast and build alert": {"main": [[{"node": "Weather threshold reached?", "type": "main", "index": 0}]]},
+    "Weather threshold reached?": {"main": [[{"node": "Select enabled channels", "type": "main", "index": 0}], []]},
+    "Select enabled channels": {"main": [[{"node": "Route by channel", "type": "main", "index": 0}]]},
+    "Route by channel": {"main": [[{"node": "Send weather alert email", "type": "main", "index": 0}], [{"node": "Send weather alert Telegram", "type": "main", "index": 0}]]},
+    "Send weather alert email": {"main": [[{"node": "Record email delivery (ignore 409)", "type": "main", "index": 0}]]},
+    "Send weather alert Telegram": {"main": [[{"node": "Record Telegram delivery (ignore 409)", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {"executionOrder": "v1", "timezone": "Asia/Kolkata"},
+  "versionId": "weather-alerts-v1",
+  "meta": {"templateCredsSetupCompleted": false},
+  "tags": []
+}
