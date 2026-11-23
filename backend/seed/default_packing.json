@@ -1,0 +1,18 @@
+[
+  {"name": "Government photo ID", "note": "Aadhaar, passport or driving licence"},
+  {"name": "Tickets and booking confirmations", "note": "Printed or offline copies"},
+  {"name": "Phone charger"},
+  {"name": "Power bank"},
+  {"name": "Toothbrush and toothpaste"},
+  {"name": "Personal medicines", "note": "Carry prescriptions where applicable"},
+  {"name": "Basic first-aid kit"},
+  {"name": "Reusable water bottle"},
+  {"name": "Sunscreen"},
+  {"name": "Comfortable walking shoes"},
+  {"name": "Change of clothes"},
+  {"name": "Sleepwear"},
+  {"name": "Toiletries"},
+  {"name": "Hand sanitiser"},
+  {"name": "Cash and cards"},
+  {"name": "Sunglasses"}
+]
